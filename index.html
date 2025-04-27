@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BlockTes</title>
+  <style>
+    :root {
+      --background: #eef2ff;
+      --board-background: #dbeafe;
+      --cell-background: #ffffff;
+      --text-color: #5b21b6;
+      --flash-color: #facc15;
+      --shadow-color: rgba(100,116,139,0.5);
+      --block-colors: #f87171,#fb923c,#facc15,#4ade80,#60a5fa,#a78bfa;
+    }
+    body.dark {
+      --background: #0f172a;
+      --board-background: #1e293b;
+      --cell-background: #334155;
+      --text-color: #c084fc;
+      --flash-color: #fde68a;
+      --shadow-color: rgba(148,163,184,0.5);
+    }
+    body {
+      margin: 0; font-family: 'Poppins', sans-serif;
+      background: var(--background); color: var(--text-color);
+      display: flex; flex-direction: column; align-items: center;
+      height: 100vh; overflow: hidden;
+      transition: background 0.3s, color 0.3s;
+    }
+    h1 { margin: 20px; font-size: 32px; }
+    #menu, #gameOver {
+      position: absolute; top:50%; left:50%;
+      transform:translate(-50%,-50%);
+      background: var(--board-background);
+      padding:30px; border-radius:20px;
+      box-shadow:0 0 20px rgba(0,0,0,0.2);
+      text-align:center; display:flex;
+      flex-direction:column; gap:20px;
+      z-index: 100; /* поверх всіх */
+    }
+    #gameOver { display: none; }
+    #menu button, #gameOver button {
+      background: var(--text-color); color:white; border:none;
+      padding:12px 24px; border-radius:15px;
+      font-size:20px; cursor:pointer;
+      transition: background 0.3s;
+    }
+    #menu button:hover, #gameOver button:hover { background: #7c3aed; }
+    #gameContainer {
+      display:none; flex-direction:column;
+      align-items:center; margin-top:30px;
+    }
+    #game {
+      display:grid;
+      grid-template: repeat(9,45px)/ repeat(9,45px);
+      gap:4px;
+      background:var(--board-background);
+      padding:10px; border-radius:20px;
+      box-shadow:0 0 10px rgba(147,197,253,0.5);
+      position:relative;
+    }
+    .cell {
+      width:45px; height:45px;
+      background: var(--cell-background);
+      border-radius:12px;
+      transition: background 0.3s;
+    }
+    .shadow { background: var(--shadow-color); }
+    .flash { animation: flash 0.4s forwards; }
+    @keyframes flash {
+      0% { background: var(--flash-color); }
+      100% { background: var(--cell-background); }
+    }
+    #pieces { margin-top:20px; display:flex; gap:20px; }
+    .piece {
+      background: var(--cell-background);
+      padding:10px; border-radius:15px;
+      display:inline-flex; flex-direction:column;
+      gap:4px; cursor:grab; user-select:none;
+      box-shadow:0 4px 6px rgba(0,0,0,0.1);
+    }
+    .row { display:flex; gap:4px; }
+    .block {
+      width:20px; height:20px;
+      border-radius:6px;
+    }
+    #scoreBoard {
+      margin-top:20px; font-size:24px;
+    }
+    .score-popup {
+      position:absolute; font-size:20px;
+      font-weight:bold; animation:rise 1s forwards;
+      pointer-events:none; color:gold;
+    }
+    @keyframes rise {
+      0% { transform:translate(-50%,0); opacity:1; }
+      100% { transform:translate(-50%,-50px); opacity:0; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="menu">
+  <h1>BlockTes</h1>
+  <div>Рекорд: <span id="bestScore">0</span></div>
+  <button onclick="startGame()">🎮 Грати</button>
+  <button onclick="toggleTheme()">🎨 Тема</button>
+</div>
+
+<div id="gameContainer">
+  <div id="scoreBoard">Очки: <span id="score">0</span></div>
+  <div id="game"></div>
+  <div id="pieces"></div>
+</div>
+
+<div id="gameOver">
+  <h2>Гра закінчена!</h2>
+  <div>Ваш результат: <span id="finalScore">0</span></div>
+  <button onclick="retry()">🔄 Ще раз</button>
+  <button onclick="backToMenu()">🏠 Меню</button>
+</div>
+
+<script>
+// пул кольорів
+const COLORS = getComputedStyle(document.documentElement)
+  .getPropertyValue('--block-colors').split(',').map(s=>s.trim());
+
+let board, score, draggedShape, draggedElem;
+const gameEl = document.getElementById('game'),
+      piecesEl = document.getElementById('pieces'),
+      scoreEl  = document.getElementById('score'),
+      bestEl   = document.getElementById('bestScore'),
+      finalEl  = document.getElementById('finalScore'),
+      menu     = document.getElementById('menu'),
+      gameContainer = document.getElementById('gameContainer'),
+      gameOver = document.getElementById('gameOver');
+
+const shapes = [
+  [[1]],[[1,1]],[[1],[1]],
+  [[1,1],[1,1]],[[1,1,1]],[[1],[1],[1]],
+  [[1,0],[1,1]],[[0,1],[1,1]],
+  [[1,1,0],[0,1,1]],[[0,1,1],[1,1,0]],
+  [[1,1,1],[0,1,0]],[[1],[1],[1],[1]],[[1,1,1,1]]
+];
+
+function loadBest() {
+  bestEl.textContent = localStorage.getItem('blocktes-best')||0;
+}
+function saveBest(){
+  let b = +localStorage.getItem('blocktes-best')||0;
+  if(score>b) localStorage.setItem('blocktes-best',score);
+}
+
+function startGame(){
+  menu.style.display='none';
+  gameOver.style.display='none';
+  gameContainer.style.display='flex';
+  board = Array.from({length:9},()=>Array(9).fill(0));
+  score = 0; scoreEl.textContent=0;
+  createBoard();
+  createPieces();
+}
+
+function backToMenu(){
+  gameContainer.style.display='none';
+  gameOver.style.display='none';
+  menu.style.display='flex';
+  loadBest();
+}
+
+function retry(){
+  saveBest();
+  startGame();
+}
+
+function toggleTheme(){
+  document.body.classList.toggle('dark');
+}
+
+function createBoard(){
+  gameEl.innerHTML='';
+  for(let y=0;y<9;y++){
+    for(let x=0;x<9;x++){
+      const cell=document.createElement('div');
+      cell.className='cell'; cell.dataset.x=x; cell.dataset.y=y;
+      if(board[y][x]) cell.style.background=board[y][x];
+      cell.addEventListener('dragover',onDragOver);
+      cell.addEventListener('dragleave',clearShadows);
+      cell.addEventListener('drop',onDrop);
+      gameEl.append(cell);
+    }
+  }
+}
+
+function createPieces(){
+  piecesEl.innerHTML='';
+  for(let i=0;i<3;i++){
+    const shape=JSON.parse(JSON.stringify(
+      shapes[Math.floor(Math.random()*shapes.length)]
+    ));
+    const piece=document.createElement('div');
+    piece.className='piece'; piece.draggable=true;
+    piece.dataset.shape=JSON.stringify(shape);
+    piece.addEventListener('dragstart',e=>{
+      draggedShape=shape; draggedElem=piece;
+    });
+    piece.addEventListener('dragend',clearShadows);
+    shape.forEach(row=>{
+      const rowEl=document.createElement('div'); rowEl.className='row';
+      row.forEach(c=>{
+        const blk=document.createElement('div'); blk.className='block';
+        if(c) blk.style.background=COLORS[Math.floor(Math.random()*COLORS.length)];
+        else blk.style.visibility='hidden';
+        rowEl.append(blk);
+      });
+      piece.append(rowEl);
+    });
+    piecesEl.append(piece);
+  }
+  // перевіряємо кінець гри тут:
+  console.log('Перевіряємо кінець гри після спавну фігур...');
+  if(!canPlaceAny()){
+    console.log('Game Over викликана!');
+    endGame();
+  }
+}
+
+function canPlaceAny(){
+  for(const p of piecesEl.children){
+    const shape=JSON.parse(p.dataset.shape);
+    for(let y=0;y<9;y++){
+      for(let x=0;x<9;x++){
+        if(canPlace(shape,x,y)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function endGame(){
+  finalEl.textContent=score;
+  gameOver.style.display='flex';
+  saveBest();
+}
+
+function onDragOver(e){
+  e.preventDefault(); clearShadows();
+  const x=+e.target.dataset.x, y=+e.target.dataset.y;
+  if(canPlace(draggedShape,x,y)){
+    draggedShape.forEach((row,dy)=>row.forEach((c,dx)=>{
+      if(c){
+        const cell=document.querySelector(`.cell[data-x="${x+dx}"][data-y="${y+dy}"]`);
+        if(cell) cell.classList.add('shadow');
+      }
+    }));
+  }
+}
+
+function onDrop(e){
+  e.preventDefault(); clearShadows();
+  const x=+e.target.dataset.x, y=+e.target.dataset.y;
+  if(canPlace(draggedShape,x,y)){
+    draggedShape.forEach((row,dy)=>row.forEach((c,dx)=>{
+      if(c){
+        board[y+dy][x+dx]=COLORS[Math.floor(Math.random()*COLORS.length)];
+      }
+    }));
+    draggedElem.remove();
+    createBoard();
+    checkLines();
+    if(!piecesEl.children.length) createPieces();
+    score+=10; scoreEl.textContent=score;
+  }
+}
+
+function canPlace(shape,x,y){
+  return shape.every((row,dy)=>row.every((c,dx)=>{
+    if(!c) return true;
+    return y+dy<9&&x+dx<9&&!board[y+dy][x+dx];
+  }));
+}
+
+function clearShadows(){
+  document.querySelectorAll('.shadow').forEach(c=>c.classList.remove('shadow'));
+}
+
+function checkLines(){
+  let cleared=0;
+  for(let y=0;y<9;y++){
+    if(board[y].every(c=>c)){ cleared++;
+      for(let x=0;x<9;x++){ board[y][x]=0; animateFlash(x,y); }
+    }
+  }
+  for(let x=0;x<9;x++){
+    if(board.every(r=>r[x])){ cleared++;
+      for(let y=0;y<9;y++){ board[y][x]=0; animateFlash(x,y); }
+    }
+  }
+  if(cleared){
+    setTimeout(createBoard,500);
+    const pts=cleared*20;
+    score+=pts; scoreEl.textContent=score;
+    showPopup(pts);
+  }
+}
+
+function animateFlash(x,y){
+  const c=document.querySelector(`.cell[data-x="${x}"][data-y="${y}"]`);
+  if(c) c.classList.add('flash');
+}
+
+function showPopup(pts){
+  const p=document.createElement('div');
+  p.className='score-popup'; p.innerText=`+${pts}`;
+  p.style.left='50%'; p.style.top='50%';
+  gameEl.append(p); setTimeout(()=>p.remove(),1000);
+}
+
+// ініціалізуємо рекорд на початку
+loadBest();
+</script>
+</body>
+</html>
